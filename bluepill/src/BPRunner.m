@@ -15,6 +15,7 @@
 #import "bp/src/BPWaitTimer.h"
 #import "bp/src/SimulatorHelper.h"
 #import "BPPacker.h"
+#import "BPTask.h"
 #import "BPRunner.h"
 
 #include <mach/mach.h>
@@ -69,68 +70,7 @@ maxprocs(void)
     return runner;
 }
 
-- (NSTask *)newTaskWithBundle:(BPXCTestFile *)bundle
-                    andNumber:(NSUInteger)number
-                     andIndex:(NSUInteger)index
-                    andDevice:(NSString *)deviceID
-           andCompletionBlock:(void (^)(NSTask *))block {
-    BPConfiguration *cfg = [self.config mutableCopy];
-    assert(cfg);
-    cfg.appBundlePath = bundle.UITargetAppPath ?: bundle.testHostPath;
-    cfg.testBundlePath = bundle.testBundlePath;
-    cfg.testRunnerAppPath = bundle.UITargetAppPath ? bundle.testHostPath : nil;
-    cfg.testCasesToSkip = bundle.skipTestIdentifiers;
-    if (cfg.commandLineArguments) {
-        [cfg.commandLineArguments arrayByAddingObjectsFromArray:bundle.commandLineArguments];
-    } else {
-        cfg.commandLineArguments = bundle.commandLineArguments;
-    }
-    if (cfg.environmentVariables) {
-        NSMutableDictionary *newEnv = [[NSMutableDictionary alloc] initWithDictionary:cfg.environmentVariables];
-        for (NSString *key in bundle.environmentVariables) {
-            newEnv[key] = bundle.environmentVariables[key];
-        }
-        cfg.environmentVariables = (NSDictionary<NSString *, NSString *>*) newEnv;
-    } else {
-        cfg.environmentVariables = bundle.environmentVariables;
-    }
-    cfg.dependencies = bundle.dependencies;
-    if (self.config.cloneSimulator) {
-        cfg.templateSimUDID = self.testHostSimTemplates[bundle.testHostPath];
-    }
-    NSError *err;
-    NSString *tmpFileName = [NSString stringWithFormat:@"%@/bluepill-%u-config",
-                             NSTemporaryDirectory(),
-                             getpid()];
-
-    cfg.configOutputFile = [BPUtils mkstemp:tmpFileName withError:&err];
-    if (!cfg.configOutputFile) {
-        fprintf(stderr, "ERROR: %s\n", [[err localizedDescription] UTF8String]);
-        return nil;
-    }
-    cfg.outputDirectory = [self.config.outputDirectory
-                           stringByAppendingPathComponent:
-                           [NSString stringWithFormat:@"BP-%lu", (unsigned long)number]];
-    cfg.testTimeEstimatesJsonFile = self.config.testTimeEstimatesJsonFile;
-    [cfg printConfig];
-    NSTask *task = [[NSTask alloc] init];
-    [task setLaunchPath:self.bpExecutable];
-    [task setArguments:@[@"-c", cfg.configOutputFile]];
-    NSMutableDictionary *env = [[NSMutableDictionary alloc] init];
-    [env addEntriesFromDictionary:[[NSProcessInfo processInfo] environment]];
-    [env setObject:[NSString stringWithFormat:@"%lu", number] forKey:@"_BP_NUM"];
-    [env setObject:[NSString stringWithFormat:@"%lu", index] forKey:@"_BP_INDEX"];
-    [task setEnvironment:env];
-    [task setTerminationHandler:^(NSTask *task) {
-        [[NSFileManager defaultManager] removeItemAtPath:cfg.configOutputFile
-                                                   error:nil];
-        [BPUtils printInfo:INFO withString:@"BP-%lu (PID %u) has finished with exit code %d.",
-                                            number, [task processIdentifier], [task terminationStatus]];
-        block(task);
-    }];
-    return task;
-}
-
+// TODO: SSSYYY also move it to BPTask
 - (NSTask *)newTaskToDeleteDevice:(NSString *)deviceID andNumber:(NSUInteger)number {
     NSTask *task = [[NSTask alloc] init];
     [task setLaunchPath:self.bpExecutable];
@@ -216,15 +156,17 @@ maxprocs(void)
     NSUInteger taskNumber = 0;
     __block int rc = 0;
 
+    __block NSMutableArray *taskNumberList = [[NSMutableArray alloc] init];
+    __block NSMutableArray *idleBPTaskList = [[NSMutableArray alloc] init];
+    __block NSMutableArray *launchedBPTaskList = [[NSMutableArray alloc] init];
+    __block NSMutableArray *deviceList = [[NSMutableArray alloc] init];
+    for (NSUInteger i = 1; i <= numSims; i++) {
+        BPTask *task = [BPTask BPTaskWithLaneID:i];
+        [idleBPTaskList addObject:task];
+    }
+
     int maxProcs = maxprocs();
     int seconds = 0;
-    __block NSMutableArray *taskList = [[NSMutableArray alloc] init];
-    __block NSMutableArray *deviceList = [[NSMutableArray alloc] init];
-    __block NSMutableArray *simList = [[NSMutableArray alloc] init];
-    for (NSUInteger i = numSims; i >= 1; i--) {
-        [simList addObject:[NSNumber numberWithUnsignedLong:i]];
-    }
-    self.nsTaskList = [[NSMutableArray alloc] init];
     int old_interrupted = interrupted;
     NSRunningApplication *app;
     if (_config.headlessMode == NO) {
@@ -250,46 +192,40 @@ maxprocs(void)
         int noLaunchedTasks;
         int canLaunchTask;
         @synchronized (self) {
-            noLaunchedTasks = (launchedTasks == 0);
-            canLaunchTask = (launchedTasks < numSims);
+            noLaunchedTasks = ([launchedBPTaskList count] == 0);
+            canLaunchTask = ([idleBPTaskList count] > 0);
         }
         if (noLaunchedTasks && (bundles.count == 0 || interrupted)) break;
         if (bundles.count > 0 && canLaunchTask && !interrupted) {
             NSString *deviceID = nil;
-            NSUInteger simIndex = 0;
+            BPTask *task;
             @synchronized(self) {
                 if ([deviceList count] > 0) {
                     deviceID = [deviceList objectAtIndex:0];
                     [deviceList removeObjectAtIndex:0];
                 }
-                if ([simList count] > 0) {
-                    simIndex = [[simList lastObject] unsignedLongValue];
-                    [simList removeLastObject];
+                if ([idleBPTaskList count] > 0) {
+                    task = [idleBPTaskList objectAtIndex:0];
+                    [idleBPTaskList removeObjectAtIndex:0];
                 }
             }
-            NSTask *task = [self newTaskWithBundle:[bundles objectAtIndex:0]
-                                         andNumber:++taskNumber
-                                          andIndex:simIndex
-                                         andDevice:deviceID
-                                andCompletionBlock:^(NSTask * _Nonnull task) {
+            [task launchTaskWithBundle:[bundles objectAtIndex:0]
+                             andConfig:self.config
+                             andNumber:++taskNumber
+                             andDevice:deviceID
+                    andCompletionBlock:^(BPTask * _Nonnull task) {
                 @synchronized (self) {
-                    launchedTasks--;
-                    [taskList removeObject:[NSString stringWithFormat:@"%lu", taskNumber]];
-                    [self.nsTaskList removeObject:task];
-                    [simList addObject:[NSNumber numberWithUnsignedLong:simIndex]];
+                    [launchedBPTaskList removeObject:task];
+                    [idleBPTaskList insertObject:task atIndex:0];
+                    [taskNumberList removeObject:[NSString stringWithFormat:@"%lu", taskNumber]];
                     rc = (rc || [task terminationStatus]);
                 };
                 [BPUtils printInfo:INFO withString:@"PID %d exited %d.", [task processIdentifier], [task terminationStatus]];
                 rc = (rc || [task terminationStatus]);
             }];
-            if (!task) {
-                [BPUtils printInfo:ERROR withString:@"task is nil!"];
-                exit(1);
-            }
-            [task launch];
             @synchronized(self) {
-                [taskList addObject:[NSString stringWithFormat:@"%lu", taskNumber]];
-                [self.nsTaskList addObject:task];
+                [taskNumberList addObject:[NSString stringWithFormat:@"%lu", taskNumber]];
+                [launchedBPTaskList addObject:task];
                 [bundles removeObjectAtIndex:0];
                 [BPUtils printInfo:INFO withString:@"Started BP-%lu (PID %d).", taskNumber, [task processIdentifier]];
                 launchedTasks++;
@@ -299,7 +235,7 @@ maxprocs(void)
         if (seconds % 30 == 0) {
             NSString *listString;
             @synchronized (self) {
-                listString = [taskList componentsJoinedByString:@", "];
+                listString = [taskNumberList componentsJoinedByString:@", "];
             }
             [BPUtils printInfo:INFO withString:@"%lu BP(s) still running. [%@]", launchedTasks, listString];
             [BPUtils printInfo:INFO withString:@"Using %d of %d processes.", numprocs(), maxProcs];
