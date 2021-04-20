@@ -31,7 +31,7 @@
                    andNumber:(NSUInteger)number
                    andDevice:(NSString *)deviceID
           andTemplateSimUDID:(NSString *)templateSimUDID
-          andCompletionBlock:(void (^)(BPSwimlane *))block {
+          andCompletionBlock:(void (^)(NSTask *))block {
     self.isBusy = YES;
     self.taskNumber = number;
 

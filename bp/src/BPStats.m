@@ -188,7 +188,7 @@
     // Metadata
     NSString *threadName = @"Bluepill";
     if (bundleID > 0) {
-        threadName = [NSString stringWithFormat:@"BP #%lu", bundleID];
+        threadName = [NSString stringWithFormat:@"BP Swimlane #%lu", bundleID];
     }
     [writer writeLine:[NSString stringWithFormat:@"{\"name\": \"thread_name\", \"ph\": \"M\", \"pid\": 1, \"tid\": %lu, \"args\": {\"name\": \"%@\"}},",
                        bundleID,

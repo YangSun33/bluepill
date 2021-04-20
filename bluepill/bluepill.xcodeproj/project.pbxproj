@@ -12,6 +12,7 @@
 		0173520F23679E0A008BFA4E /* BPHTMLReportWriteTests.m in Sources */ = {isa = PBXBuildFile; fileRef = 0173520E23679E0A008BFA4E /* BPHTMLReportWriteTests.m */; };
 		0173521323679E87008BFA4E /* TEST-FinalReport.xml in Resources */ = {isa = PBXBuildFile; fileRef = 0173521223679E87008BFA4E /* TEST-FinalReport.xml */; };
 		56B74BCA1E4C0A15004E6624 /* BPIntegrationTests.m in Sources */ = {isa = PBXBuildFile; fileRef = 56B74BC91E4C0A15004E6624 /* BPIntegrationTests.m */; };
+		8A3B01062637140D00211DAB /* BPSwimlane.m in Sources */ = {isa = PBXBuildFile; fileRef = 8AEAAC242604EF420084FB85 /* BPSwimlane.m */; };
 		8AEAAC252604EF420084FB85 /* BPSwimlane.m in Sources */ = {isa = PBXBuildFile; fileRef = 8AEAAC242604EF420084FB85 /* BPSwimlane.m */; };
 		B3109F792151F72F00B9309C /* CoreSimulator.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B3380AEE2150BD8700752E1B /* CoreSimulator.framework */; };
 		BA1809E91DBA8FC300D7D130 /* BPRunnerTests.m in Sources */ = {isa = PBXBuildFile; fileRef = BA1809E81DBA8FC300D7D130 /* BPRunnerTests.m */; };
@@ -356,6 +357,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8A3B01062637140D00211DAB /* BPSwimlane.m in Sources */,
 				BA1809E91DBA8FC300D7D130 /* BPRunnerTests.m in Sources */,
 				BA1809FB1DBA949600D7D130 /* BPPacker.m in Sources */,
 				BA1809EB1DBA910400D7D130 /* BPAppTests.m in Sources */,
