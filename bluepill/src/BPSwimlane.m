@@ -8,21 +8,31 @@
 //  WITHOUT WARRANTIES OF ANY KIND, either express or implied.  See the License for the specific language governing permissions and limitations under the License.
 
 #import "bp/src/BPUtils.h"
-#import "BPTask.h"
+#import "BPSwimlane.h"
 
-@implementation BPTask
+@interface BPSwimlane()
 
-+ (instancetype)BPTaskWithLaneID:(NSUInteger)laneID {
-    BPTask *bpTask = [[BPTask alloc] init];
+@property (nonatomic, assign) NSUInteger laneID;
+@property (nonatomic, strong) NSTask *task;
+
+@end
+
+@implementation BPSwimlane
+
++ (instancetype)BPSwimlaneWithLaneID:(NSUInteger)laneID {
+    BPSwimlane *bpTask = [[BPSwimlane alloc] init];
     bpTask.laneID = laneID;
     return bpTask;
 }
 
 - (void)launchTaskWithBundle:(BPXCTestFile *)bundle
                    andConfig:(BPConfiguration *)config
+               andLaunchPath:(NSString *)launchPath
                    andNumber:(NSUInteger)number
                    andDevice:(NSString *)deviceID
-          andCompletionBlock:(void (^)(BPTask *))block {
+          andTemplateSimUDID:(NSString *)templateSimUDID
+          andCompletionBlock:(void (^)(BPSwimlane *))block {
+    self.isBusy = YES;
     self.taskNumber = number;
 
     BPConfiguration *cfg = [config mutableCopy];
@@ -47,8 +57,7 @@
     }
     cfg.dependencies = bundle.dependencies;
     if (config.cloneSimulator) {
-        // TODO: SSSYYY
-//        cfg.templateSimUDID = self.testHostSimTemplates[bundle.testHostPath];
+        cfg.templateSimUDID = templateSimUDID;
     }
     NSError *err;
     NSString *tmpFileName = [NSString stringWithFormat:@"%@/bluepill-%u-config",
@@ -67,8 +76,7 @@
     [cfg printConfig];
 
     NSTask *task = [[NSTask alloc] init];
-    // TODO: SSSYYY
-//    [task setLaunchPath:self.bpExecutable];
+    [task setLaunchPath:launchPath];
     [task setArguments:@[@"-c", cfg.configOutputFile]];
     NSMutableDictionary *env = [[NSMutableDictionary alloc] init];
     [env addEntriesFromDictionary:[[NSProcessInfo processInfo] environment]];
@@ -76,32 +84,30 @@
     [env setObject:[NSString stringWithFormat:@"%lu", self.laneID] forKey:@"_BP_INDEX"];
     [task setEnvironment:env];
     [task setTerminationHandler:^(NSTask *task) {
+        self.isBusy = NO;
+        self.task = nil;
+
         [[NSFileManager defaultManager] removeItemAtPath:cfg.configOutputFile
                                                    error:nil];
         [BPUtils printInfo:INFO withString:@"BP-%lu (PID %u) has finished with exit code %d.",
                                             number, [task processIdentifier], [task terminationStatus]];
-        block(self);
+        block(task);
     }];
 
     if (!task) {
+        self.isBusy = NO;
         [BPUtils printInfo:ERROR withString:@"task is nil!"];
         exit(1);
     }
+
     [task launch];
+    self.task = task;
+    [BPUtils printInfo:INFO withString:@"Started BP-%lu (PID %d).", number, [task processIdentifier]];
 }
 
-- (int)processIdentifier {
-    if (self.task) {
-        return self.task.processIdentifier;
-    }
-    return -1;
-}
-
-- (int)terminationStatus {
-    if (self.task) {
-        return self.task.terminationStatus;
-    }
-    return -1;
+- (void)interrupt {
+    [self.task interrupt];
+    self.isBusy = NO;
 }
 
 @end

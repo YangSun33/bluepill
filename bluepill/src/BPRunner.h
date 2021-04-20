@@ -15,7 +15,7 @@
 
 @property (nonatomic, strong) BPConfiguration *config;
 @property (nonatomic, strong) NSString *bpExecutable;
-@property (nonatomic, strong) NSMutableArray *nsTaskList; // TODO: SSSYYY remove and fix tests with bpTaskList
+@property (nonatomic, strong) NSMutableArray *swimlaneList;
 @property (nonatomic, strong) NSDictionary *testHostSimTemplates;
 
 /*!
@@ -33,5 +33,8 @@
  */
 - (int)runWithBPXCTestFiles:(NSArray<BPXCTestFile *>*)xcTestFiles;
 
-- (void) interrupt;
+- (void)interrupt;
+
+- (NSUInteger)busySwimlaneCount;
+
 @end

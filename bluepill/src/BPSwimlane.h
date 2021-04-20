@@ -11,18 +11,17 @@
 #import "bp/src/BPXCTestFile.h"
 #import "bp/src/BPConfiguration.h"
 
-@interface BPTask : NSObject
+@interface BPSwimlane : NSObject
 
-@property (nonatomic, assign) NSUInteger laneID;
-@property (nonatomic, strong) NSTask *task; //TODO: SSSYYY Maybe weak so that it could be nil after terminated
+@property (nonatomic, assign) BOOL isBusy;
 @property (nonatomic, assign) NSUInteger taskNumber;
 
 /*!
- * @discussion get a BPTask to execute `bp`.
+ * @discussion get a BPSwimlane to execute `bp`.
  * @param laneID the Lane ID that keeps the same for `bp` tasks.
- * @return return the BPTask.
+ * @return return the BPSwimlane.
  */
-+ (instancetype)BPTaskWithLaneID:(NSUInteger)laneID;
++ (instancetype)BPSwimlaneWithLaneID:(NSUInteger)laneID;
 
 /*!
  * @discussion Launch a NSTask to create a new Simulator wrapped in a `bp` process. It will run the specified bundle and execute the block once it finishes.
@@ -34,12 +33,12 @@
  */
 - (void)launchTaskWithBundle:(BPXCTestFile *)bundle
                    andConfig:(BPConfiguration *)config
+               andLaunchPath:(NSString *)launchPath
                    andNumber:(NSUInteger)number
                    andDevice:(NSString *)deviceID
-          andCompletionBlock:(void (^)(BPTask * ))block;
+          andTemplateSimUDID:(NSString *)templateSimUDID
+          andCompletionBlock:(void (^)(NSTask *))block;
 
-// TODO: SSSYYY
-- (int)processIdentifier;
-- (int)terminationStatus;
+- (void)interrupt;
 
 @end

@@ -15,8 +15,8 @@
 #import "bp/src/BPWaitTimer.h"
 #import "bp/src/SimulatorHelper.h"
 #import "BPPacker.h"
-#import "BPTask.h"
 #import "BPRunner.h"
+#import "BPSwimlane.h"
 
 #include <mach/mach.h>
 #include <mach/mach_host.h>
@@ -70,7 +70,6 @@ maxprocs(void)
     return runner;
 }
 
-// TODO: SSSYYY also move it to BPTask
 - (NSTask *)newTaskToDeleteDevice:(NSString *)deviceID andNumber:(NSUInteger)number {
     NSTask *task = [[NSTask alloc] init];
     [task setLaunchPath:self.bpExecutable];
@@ -152,21 +151,18 @@ maxprocs(void)
         [bundles addObjectsFromArray:copyBundles];
     }
     [BPUtils printInfo:INFO withString:@"Packed tests into %lu bundles", (unsigned long)[bundles count]];
-    __block NSUInteger launchedTasks = 0;
     NSUInteger taskNumber = 0;
     __block int rc = 0;
 
-    __block NSMutableArray *taskNumberList = [[NSMutableArray alloc] init];
-    __block NSMutableArray *idleBPTaskList = [[NSMutableArray alloc] init];
-    __block NSMutableArray *launchedBPTaskList = [[NSMutableArray alloc] init];
-    __block NSMutableArray *deviceList = [[NSMutableArray alloc] init];
+    self.swimlaneList = [[NSMutableArray alloc] initWithCapacity:numSims];
     for (NSUInteger i = 1; i <= numSims; i++) {
-        BPTask *task = [BPTask BPTaskWithLaneID:i];
-        [idleBPTaskList addObject:task];
+        BPSwimlane *swimlane = [BPSwimlane BPSwimlaneWithLaneID:i];
+        [self.swimlaneList addObject:swimlane];
     }
 
     int maxProcs = maxprocs();
     int seconds = 0;
+    __block NSMutableArray *deviceList = [[NSMutableArray alloc] init];
     int old_interrupted = interrupted;
     NSRunningApplication *app;
     if (_config.headlessMode == NO) {
@@ -192,49 +188,51 @@ maxprocs(void)
         int noLaunchedTasks;
         int canLaunchTask;
         @synchronized (self) {
-            noLaunchedTasks = ([launchedBPTaskList count] == 0);
-            canLaunchTask = ([idleBPTaskList count] > 0);
+            NSUInteger busySwimlaneCount = [self busySwimlaneCount];
+            noLaunchedTasks = (busySwimlaneCount == 0);
+            canLaunchTask = (busySwimlaneCount < numSims);
         }
         if (noLaunchedTasks && (bundles.count == 0 || interrupted)) break;
         if (bundles.count > 0 && canLaunchTask && !interrupted) {
             NSString *deviceID = nil;
-            BPTask *task;
+            BPSwimlane *swimlane;
             @synchronized(self) {
                 if ([deviceList count] > 0) {
                     deviceID = [deviceList objectAtIndex:0];
                     [deviceList removeObjectAtIndex:0];
                 }
-                if ([idleBPTaskList count] > 0) {
-                    task = [idleBPTaskList objectAtIndex:0];
-                    [idleBPTaskList removeObjectAtIndex:0];
-                }
+                swimlane = [self firstIdleSwimlane];
             }
-            [task launchTaskWithBundle:[bundles objectAtIndex:0]
-                             andConfig:self.config
-                             andNumber:++taskNumber
-                             andDevice:deviceID
-                    andCompletionBlock:^(BPTask * _Nonnull task) {
+            BPXCTestFile *bundle = [bundles objectAtIndex:0];
+            [swimlane launchTaskWithBundle:bundle
+                                 andConfig:self.config
+                             andLaunchPath:self.bpExecutable
+                                 andNumber:++taskNumber
+                                 andDevice:deviceID
+                        andTemplateSimUDID:self.testHostSimTemplates[bundle.testHostPath]
+                        andCompletionBlock:^(NSTask * _Nonnull task) {
                 @synchronized (self) {
-                    [launchedBPTaskList removeObject:task];
-                    [idleBPTaskList insertObject:task atIndex:0];
-                    [taskNumberList removeObject:[NSString stringWithFormat:@"%lu", taskNumber]];
                     rc = (rc || [task terminationStatus]);
                 };
                 [BPUtils printInfo:INFO withString:@"PID %d exited %d.", [task processIdentifier], [task terminationStatus]];
                 rc = (rc || [task terminationStatus]);
             }];
             @synchronized(self) {
-                [taskNumberList addObject:[NSString stringWithFormat:@"%lu", taskNumber]];
-                [launchedBPTaskList addObject:task];
                 [bundles removeObjectAtIndex:0];
-                [BPUtils printInfo:INFO withString:@"Started BP-%lu (PID %d).", taskNumber, [task processIdentifier]];
-                launchedTasks++;
             }
         }
         sleep(1);
         if (seconds % 30 == 0) {
             NSString *listString;
+            NSUInteger launchedTasks = 0;
             @synchronized (self) {
+                NSMutableArray *taskNumberList = [[NSMutableArray alloc] init];
+                for (BPSwimlane *swimlane in self.swimlaneList) {
+                    if (swimlane.isBusy) {
+                        launchedTasks++;
+                        [taskNumberList addObject:[NSString stringWithFormat:@"%lu", swimlane.taskNumber]];
+                    }
+                }
                 listString = [taskNumberList componentsJoinedByString:@", "];
             }
             [BPUtils printInfo:INFO withString:@"%lu BP(s) still running. [%@]", launchedTasks, listString];
@@ -271,13 +269,11 @@ maxprocs(void)
 }
 
 - (void)interrupt {
-    if (self.nsTaskList == nil) return;
+    if (self.swimlaneList == nil) return;
 
-    for (int i = 0; i < [self.nsTaskList count]; i++) {
-        [((NSTask *)[self.nsTaskList objectAtIndex:i]) interrupt];
+    for (BPSwimlane *swimlane in self.swimlaneList) {
+        [swimlane interrupt];
     }
-
-    [self.nsTaskList removeAllObjects];
 }
 
 - (void)addCounters {
@@ -340,6 +336,25 @@ maxprocs(void)
     } else {
         [BPUtils printInfo:ERROR withString:@"Failed to get Memory info: %s", mach_error_string(kr)];
     }
+}
+
+- (NSUInteger)busySwimlaneCount {
+    NSUInteger count = 0;
+    for (BPSwimlane *swimlane in self.swimlaneList) {
+        if (swimlane.isBusy) {
+            count++;
+        }
+    }
+    return count;
+}
+
+- (BPSwimlane *)firstIdleSwimlane {
+    for (BPSwimlane *swimlane in self.swimlaneList) {
+        if (!swimlane.isBusy) {
+            return swimlane;
+        }
+    }
+    return nil;
 }
 
 @end
