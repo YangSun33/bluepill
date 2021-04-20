@@ -202,6 +202,7 @@ maxprocs(void)
                     [deviceList removeObjectAtIndex:0];
                 }
                 swimlane = [self firstIdleSwimlane];
+                swimlane.isBusy = YES;
             }
             BPXCTestFile *bundle = [bundles objectAtIndex:0];
             [swimlane launchTaskWithBundle:bundle
