@@ -195,7 +195,7 @@ maxprocs(void)
         if (noLaunchedTasks && (bundles.count == 0 || interrupted)) break;
         if (bundles.count > 0 && canLaunchTask && !interrupted) {
             NSString *deviceID = nil;
-            BPSwimlane *swimlane;
+            BPSwimlane *swimlane = nil;
             @synchronized(self) {
                 if ([deviceList count] > 0) {
                     deviceID = [deviceList objectAtIndex:0];
